@@ -1,0 +1,44 @@
+name: Release
+
+# Publish to PyPI when a GitHub release is published. Uses PyPI trusted publishing (OIDC): no API token is stored
+# anywhere. One-time setup on pypi.org: add a trusted publisher for project "sentinelforge-ai" with
+# owner tuxlimr, repository sentinelforge, workflow release.yml, environment pypi.
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version must match the release tag
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])")
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "pyproject version v$version != tag ${GITHUB_REF_NAME}"; exit 1; }
+      - run: pip install build
+      - run: python -m build backend --outdir dist
+      - name: Test the built wheel, not the source tree
+        run: |
+          pip install dist/*.whl pytest
+          cp -r backend/tests /tmp/tests && cd /tmp && python -m pytest -q tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # required for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

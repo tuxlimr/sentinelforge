@@ -65,7 +65,16 @@ Allowed tools, canaries, limits and the CI failure threshold.
 
 ## Quick start
 
-Requires Python 3.14 and Node 20+.
+Install the CLI from PyPI (the package is `sentinelforge-ai`; the command is `sentinelforge`). Python 3.11+.
+
+```bash
+pip install sentinelforge-ai
+sentinelforge guide            # 2-minute offline tour, no API keys
+```
+
+### Run the dashboard from source
+
+Requires Python 3.11+ and Node 20+.
 
 ```bash
 # Backend
@@ -82,8 +91,49 @@ Open http://localhost:5173, choose **Vulnerable demo**, and run the scan.
 ### CLI and CI
 
 ```bash
-sentinelforge test --target safe_demo --fail-on high   # exit 1 on a confirmed finding at or above "high"
+sentinelforge guide                                   # 2-minute offline tour of the whole loop
+sentinelforge test --target safe_demo --fail-on high  # exit 1 on a confirmed finding at or above "high"
 ```
+
+### Testing your own app
+
+Point SentinelForge at your app's HTTP endpoint with a `sentinelforge.yaml` file. Only test apps you own or are
+authorized to test (see [Responsible use](#responsible-use)).
+
+```bash
+sentinelforge init --url https://your-app.example.com/api/ask   # writes sentinelforge.yaml + a CI workflow
+# edit sentinelforge.yaml: set scope.authorization_confirmed: true once you have confirmed you may test it
+export APP_TOKEN=...                                            # only if your endpoint needs auth
+sentinelforge test --config sentinelforge.yaml                  # run the packs against your app
+sentinelforge regressions add --run latest                      # lock in confirmed findings
+sentinelforge regressions replay --config sentinelforge.yaml    # after your fix: exit 0 when all pass
+sentinelforge regressions export --config sentinelforge.yaml -o tests/test_ai_security.py
+```
+
+Your endpoint receives `POST {"prompt": "...", "context": {...}}` and should return
+`{"text": "...", "tool_calls": [{"name": "...", "args": {}}]}`. Plain text also works.
+
+```yaml
+version: 1
+target:
+  kind: http
+  url: https://your-app.example.com/api/ask
+  headers:
+    Authorization: "Bearer ${APP_TOKEN}"   # secrets come from environment variables only
+scope:
+  authorization_confirmed: true            # never inferred from the URL
+  allowed_hosts: [your-app.example.com]    # requests to any other host, or redirects, are blocked
+  allowed_tools: [search_docs]             # any other tool your agent calls is a finding
+limits: {max_cases: 30, timeout_seconds: 10, verify_repeats: 2}
+tests:
+  packs: [prompt_injection, canary_leakage, tool_permissions]
+ci:
+  fail_on: high
+```
+
+The config is validated strictly: unknown keys are errors (so a typo in a safety setting is never ignored),
+sensitive headers must reference environment variables, and the exported pytest file reads those variables at
+run time, so no secret is ever written to disk.
 
 ### Network exposure check (nmap)
 
