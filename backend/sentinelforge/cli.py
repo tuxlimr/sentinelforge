@@ -15,7 +15,7 @@ from rich.table import Table
 from .adapters import ScopeError
 from .engine import execute
 from .engine.replay import ReplayRequest, replay
-from .models import Limits, Run, RunRequest, TargetSpec
+from .models import Limits, Run, RunRequest, Scope, TargetSpec
 from .reporters import to_sarif
 from .storage import regressions, runs
 from .terminal import (
@@ -63,7 +63,7 @@ def _load_run(run_id: str) -> Run:
         return history[0]
     run = runs.get_run(run_id)
     if run is None:
-        raise _fail(f"Run '{run_id}' not found. List runs with `sentinelforge report latest` or check .sentinelforge/runs.")
+        raise _fail(f"Run '{run_id}' not found. List runs with `sentinelforge report latest` or look in .sentinelforge/sentinelforge.db.")
     return run
 
 
@@ -107,7 +107,7 @@ def test(
     """Run all packs and exit 1 when a confirmed finding meets --fail-on (exit 2 = scope/config error)."""
     try:
         request = RunRequest(target=TargetSpec(kind=target.value), limits=Limits(max_concurrency=concurrency))
-        with console.status(f"Testing {target.value}...") if format is Format.terminal else nullcontext():
+        with console.status(f"Testing {target.value}...", spinner="line") if format is Format.terminal else nullcontext():
             run = execute(request)
     except ScopeError as error:
         raise _fail(f"Scope error: {error}") from error
@@ -200,6 +200,36 @@ def regressions_export(
         console.print(f"Wrote {output}")
     else:
         typer.echo(text)
+
+
+@app.command()
+def exposure(
+    host: Annotated[str, typer.Argument(help="One hostname or IP address (localhost is always allowed)")],
+    expect: Annotated[list[int] | None, typer.Option("--expect", "-e", help="A port that should be open (repeatable)")] = None,
+    ports: Annotated[str | None, typer.Option(help="Comma-separated ports to probe (default: common app and AI-stack ports)")] = None,
+    authorized: Annotated[bool, typer.Option("--authorized", help="Confirm you are authorized to scan a non-local host")] = False,
+    fail_on: Annotated[Severity, typer.Option(help="Lowest severity that fails the build")] = Severity.high,
+) -> None:
+    """Check which TCP ports on a host are open that should not be (needs nmap)."""
+    from .engine.exposure import DEFAULT_PORTS, ExposureError, ExposureRequest, scan
+
+    try:
+        probe = [int(p) for p in ports.split(",")] if ports else list(DEFAULT_PORTS)
+        request = ExposureRequest(host=host, expected_ports=expect or [], ports=probe,
+                                  scope=Scope(authorization_confirmed=authorized, allowed_hosts=[host] if authorized else []))
+        with console.status(f"Scanning {host} with nmap...", spinner="line"):
+            run = scan(request)
+    except ValueError as error:
+        raise _fail(f"Ports must be comma-separated integers: {error}") from error
+    except ScopeError as error:
+        raise _fail(f"Scope error: {error}") from error
+    except ExposureError as error:
+        raise _fail(str(error), code=3) from error
+    runs.save_run(run)
+    print_results(console, run)
+    print_findings(console, run)
+    print_summary(console, run)
+    raise typer.Exit(1 if severity_failures(run, fail_on.value) else 0)
 
 
 WORKFLOW = """\

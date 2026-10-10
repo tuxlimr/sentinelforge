@@ -69,3 +69,22 @@ def test_init_writes_workflow_once():
     assert first.exit_code == 0
     assert runner.invoke(app, ["init"]).exit_code == 1  # refuses to overwrite
     assert runner.invoke(app, ["init", "--force"]).exit_code == 0
+
+
+def test_spinners_survive_a_legacy_codepage_terminal(monkeypatch):
+    """A cp1252 terminal (Windows pipes, CI logs) cannot encode Rich's default braille spinner."""
+    import io
+
+    from rich.console import Console
+
+    from sentinelforge import cli
+    from sentinelforge.guide import run_guide
+
+    def legacy_console() -> Console:
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+        return Console(file=stream, force_terminal=True, legacy_windows=False)
+
+    monkeypatch.setattr(cli, "console", legacy_console())
+    result = runner.invoke(app, ["test", "--target", "vulnerable_demo"])
+    assert result.exit_code == 1 and not isinstance(result.exception, UnicodeError)  # exit 1 is the CI gate, a crash is not
+    assert run_guide(legacy_console(), assume_yes=True) == 0

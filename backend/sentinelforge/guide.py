@@ -31,14 +31,14 @@ def _proceed(assume_yes: bool, question: str, default: bool = True) -> bool:
 
 def _scan(console: Console, kind: str):
     request = RunRequest(target=TargetSpec(kind=kind), label="guide")  # type: ignore[arg-type]
-    with console.status(f"Running test packs against {kind}..."):
+    with console.status(f"Running test packs against {kind}...", spinner="line"):
         run = execute(request)
     runs.save_run(run)
     return run
 
 
 def _replay(console: Console, kind: str) -> list:
-    with console.status(f"Replaying saved regressions against {kind}..."):
+    with console.status(f"Replaying saved regressions against {kind}...", spinner="line"):
         results = replay(ReplayRequest(target=TargetSpec(kind=kind)))  # type: ignore[arg-type]
     for result in results:
         console.print(f"  {STATUS_NOTE[result.status]}  {result.id}")
