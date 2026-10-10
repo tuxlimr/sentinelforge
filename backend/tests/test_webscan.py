@@ -71,6 +71,47 @@ class OffsiteRedirect(Hardened):
         _respond(self, 302, headers=[("Location", "http://elsewhere.invalid/")])
 
 
+_HARD_HEADERS = [
+    ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'self'"),
+    ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "strict-origin-when-cross-origin"),
+    ("Set-Cookie", "session=x; Path=/; HttpOnly; SameSite=Lax"),
+]
+
+
+class OldLibraries(Hardened):
+    """Old library URLs, plus one same-host script whose version is only in the file banner."""
+
+    requested: list[str] = []
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        OldLibraries.requested.append(path)
+        if path == "/js/jquery.min.js":
+            return _respond(self, body="/*! jQuery v1.11.0 | (c) jQuery Foundation */\n")
+        if path != "/":
+            return _respond(self, 404, "not found")
+        _respond(self, headers=_HARD_HEADERS, body="""<html><head>
+          <script src="/vendor/jquery-1.12.4.min.js"></script>
+          <script src="/js/jquery.min.js"></script>
+          <script src="https://cdn.invalid/npm/lodash@4.17.20/lodash.min.js"></script>
+          <link rel="stylesheet" href="https://cdn.invalid/bootstrap-3.4.0.min.css"></link>
+          <script src="https://cdn.invalid/moment.js/2.24.0/moment.min.js"></script>
+          <script src="https://cdn.invalid/angularjs/1.6.4/angular.min.js"></script>
+          <script src="https://cdn.invalid/jquery-ui-1.12.1/jquery-ui.min.js"></script>
+          <link rel="stylesheet" href="/bootstrap-icons.min.css"></link>
+          <!-- <script src="/jquery-1.8.0.min.js"></script> -->
+        </head><body><p>jquery-1.8.0.min.js is only mentioned in the text.</p></body></html>""")
+
+
+class CurrentLibraries(Hardened):
+    def do_GET(self):
+        if self.path != "/":
+            return _respond(self, 404, "not found")
+        _respond(self, headers=_HARD_HEADERS, body=(
+            "<html><script src='https://cdn.invalid/jquery-3.7.1.min.js'></script>"
+            "<script src='https://cdn.invalid/lodash@4.18.0/lodash.min.js'></script></html>"))
+
+
 def serve(handler):
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -160,6 +201,27 @@ def test_cookie_value_containing_flag_names_cannot_fake_the_flags():
     assert weak.passed is False and "Secure" in weak.observed and "HttpOnly" in weak.observed and "token" in weak.observed
     strong = _cookie_checks(page([("Set-Cookie", "token=x; Secure; HttpOnly; SameSite=Strict")]), https=True)[0]
     assert strong.passed
+
+
+@pytest.mark.parametrize("site", [OldLibraries], indirect=True)
+def test_outdated_libraries_are_reported_without_leaving_the_host(site):
+    OldLibraries.requested.clear()
+    run = scan(WebScanRequest(url=site, timeout_seconds=2))
+    assert ids(run) >= {"WEB-031", "WEB-032", "WEB-033", "WEB-034", "WEB-035", "WEB-036"}
+    jquery = next(f for f in run.findings if f.case_id == "WEB-031")
+    assert jquery.confidence == "medium" and "1.12.4" in jquery.evidence.response and "1.11.0" in jquery.evidence.response
+    assert "Upgrade jQuery" in jquery.mitigation and "not proof" in jquery.limitations
+    assert "/js/jquery.min.js" in OldLibraries.requested
+    assert "/vendor/jquery-1.12.4.min.js" not in OldLibraries.requested
+    assert run.budget["requests"] == 6  # page, one same-host banner, CORS, three sensitive paths
+
+
+@pytest.mark.parametrize("site", [CurrentLibraries], indirect=True)
+def test_current_library_versions_are_not_findings(site):
+    run = scan(WebScanRequest(url=site, timeout_seconds=2))
+    assert not ids(run) & {"WEB-031", "WEB-032", "WEB-033", "WEB-034", "WEB-035", "WEB-036"}
+    jquery = next(r for r in run.results if r.case_id == "WEB-031")
+    assert jquery.outcome == "passed" and "3.7.1" in jquery.name
 
 
 @pytest.mark.parametrize("site", [Vulnerable], indirect=True)

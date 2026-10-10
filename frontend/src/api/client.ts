@@ -70,4 +70,7 @@ export const api = {
 
   getSettings: () => request<Settings>("/settings"),
   saveSettings: (settings: Settings) => request<Settings>("/settings", { method: "PUT", body: JSON.stringify(settings) }),
+
+  webScan: (body: { url: string; scope?: { authorization_confirmed: boolean; allowed_hosts: string[] } }) =>
+    post<Run>("/webscan", body),
 };

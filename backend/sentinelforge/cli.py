@@ -283,7 +283,7 @@ def webscan(
     authorized: Annotated[bool, typer.Option("--authorized", help="Confirm you own this site or are authorized to test it")] = False,
     fail_on: Annotated[Severity, typer.Option(help="Lowest severity that fails the build")] = Severity.high,
 ) -> None:
-    """Check a website for common security misconfigurations (passive: ordinary GET requests only)."""
+    """Check a website for misconfigurations and outdated front-end libraries (passive: GET requests only)."""
     from urllib.parse import urlparse
 
     from .engine.webscan import WebScanRequest, scan as web_scan

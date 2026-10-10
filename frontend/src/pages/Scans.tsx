@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { ErrorBox, Loading } from "../components/States";
 import { Icon } from "../components/Icon";
 import { RunLauncher } from "../components/RunLauncher";
+import { WebScanLauncher } from "../components/WebScanLauncher";
 import { RunMetrics } from "../components/RunMetrics";
 import { RunTable } from "../components/RunTable";
 import { TrendChart } from "../components/TrendChart";
@@ -51,6 +52,7 @@ export function Scans() {
       )}
 
       <RunLauncher packs={packs.data} onFinished={(run) => navigate(`/findings?run=${run.id}`)} />
+      <WebScanLauncher onFinished={(run) => navigate(`/findings?run=${run.id}`)} />
 
       {runs.data.length > 0 && (
         <div className="grid grid-split" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>

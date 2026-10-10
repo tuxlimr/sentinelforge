@@ -137,10 +137,13 @@ run time, so no secret is ever written to disk.
 
 ### Website security check
 
-Checks a website you own (or are authorized to test) for common security misconfigurations: missing security
-headers (CSP, HSTS, clickjacking, nosniff, Referrer-Policy), weak cookie flags, software version disclosure,
-CORS that trusts any origin, exposed `.git`, `.env` and `phpinfo()` files, directory listing, plain HTTP and
-invalid TLS certificates.
+Checks a website you own (or are authorized to test) for common security misconfigurations and for front-end
+libraries in a known-vulnerable range. Misconfigurations: missing security headers (CSP, HSTS, clickjacking,
+nosniff, Referrer-Policy), weak cookie flags, software version disclosure, CORS that trusts any origin, exposed
+`.git`, `.env` and `phpinfo()` files, directory listing, plain HTTP and invalid TLS certificates. Libraries:
+jQuery, jQuery UI, Bootstrap, Lodash, Moment.js and AngularJS, read from script and stylesheet URLs on the page
+(or a version banner in a same-host file) and compared to the published fix version. A match means that release
+has a fix; it is not proof the site can be exploited.
 
 ```bash
 sentinelforge webscan http://localhost:3000/                          # loopback needs no confirmation

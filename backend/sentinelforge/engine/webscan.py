@@ -7,9 +7,11 @@ Deliberately passive and bounded:
 - at most MAX_REQUESTS requests, a per-request timeout, response bodies capped, redirects only within the same host
 - secrets found in exposed files are never stored: evidence keeps variable names, never values
 
-It reports what it observes. A missing header is a weakness, not proof of an exploitable vulnerability, and a clean
-result does not cover authentication, business logic, or injection flaws (use an active scanner such as OWASP ZAP
-for those, on systems you are authorized to test).
+It reports what it observes. A missing header is a weakness, not proof of an exploitable vulnerability. Library
+versions are read from script and stylesheet URLs (or a version banner in a same-host file) and compared to
+published fix versions. A match is not proof the site can be exploited. A clean result does not cover
+authentication, business logic, or injection flaws (use an active scanner such as OWASP ZAP for those, on
+systems you are authorized to test).
 """
 
 from __future__ import annotations
@@ -29,6 +31,15 @@ from pydantic import BaseModel, Field
 from .. import PACK_VERSION, __version__
 from ..adapters import ScopeError
 from ..models import SEVERITY_RANK, CaseResult, Evidence, Finding, Run, Scope
+from .libraries import (
+    LIMITATION as LIBRARY_LIMITATION,
+    MAX_LIBRARY_FILES,
+    LibraryHit,
+    inspect_html,
+    is_affected,
+    same_host_script,
+    version_from_banner,
+)
 
 PACK = "web_security"
 MAX_REQUESTS = 15
@@ -70,6 +81,9 @@ class _Check:
     mitigation: str = ""
     sent: str = ""
     limitations: str = "Observed from a single request; behaviour may differ on other pages or for logged-in users."
+    confidence: str = "high"
+    evidence_quality: str = "deterministic"
+    status: str = "confirmed"
 
 
 @dataclass
@@ -231,13 +245,89 @@ def _file_checks(session: _Session, base: str) -> list[_Check]:
     return checks
 
 
+def _short(value: str) -> str:
+    value = " ".join(value.split())
+    return value if len(value) <= 140 else value[:137] + "..."
+
+
+def _library_checks(session: _Session, page_url: str, page: _Page) -> list[_Check]:
+    """Compare library versions visible on the page with published fix versions. Same-host scripts only."""
+    hits = inspect_html(page.text)
+    enriched: list[LibraryHit] = []
+    fetches = 0
+    for hit in hits:
+        if hit.version is not None:
+            enriched.append(hit)
+            continue
+        if not hit.script_src:
+            session.notes.append(f"{hit.rule.name} is referenced, but its version is not in the URL.")
+            continue
+        script_url = same_host_script(hit.script_src, page_url, session.host)
+        if script_url is None:
+            session.notes.append(f"{hit.rule.name} is referenced, but its version is not in the URL and the file is on another host.")
+            continue
+        if fetches >= MAX_LIBRARY_FILES:
+            session.notes.append(f"Stopped after reading {MAX_LIBRARY_FILES} same-host script files for library versions.")
+            continue
+        try:
+            script = session.get(script_url)
+        except ScopeError:
+            session.notes.append("Stopped reading script files: request budget reached.")
+            break
+        except httpx.HTTPError:
+            session.notes.append(f"Could not read a same-host script to identify {hit.rule.name}.")
+            continue
+        fetches += 1
+        version = version_from_banner(hit.rule, script.text)
+        if version is None:
+            session.notes.append(f"{hit.rule.name} is referenced at {_short(script_url)}, but no version banner was found.")
+            continue
+        enriched.append(LibraryHit(hit.rule, version, script_url))
+
+    grouped: dict[str, list[LibraryHit]] = {}
+    for hit in enriched:
+        if hit.version is None or (hit.rule.case_id == "WEB-036" and hit.version[0] != 1):
+            continue
+        grouped.setdefault(hit.rule.case_id, []).append(hit)
+    if not grouped:
+        return [_Check("WEB-030", "Client libraries: none recognized", "low", True,
+                        observed="No recognized library version in script or stylesheet URLs.",
+                        limitations="Only looks at this page's script and stylesheet URLs, plus up to three same-host script banners. "
+                                    "Bundled libraries without a version are not identified.")]
+
+    checks = []
+    for case_id, group in grouped.items():
+        rule = group[0].rule
+        affected = [hit for hit in group if is_affected(rule, hit.version)]  # type: ignore[arg-type]
+        chosen = min(affected, key=lambda hit: hit.version or ()) if affected else max(group, key=lambda hit: hit.version or ())
+        version = chosen.version
+        assert version is not None
+        version_text = ".".join(str(part) for part in version)
+        others = sorted({".".join(str(part) for part in hit.version) for hit in group if hit.version != version})
+        where = "; ".join(_short(hit.source) for hit in group[:3])
+        observed = f"{rule.name} {version_text} referenced at {where}"
+        if others:
+            observed += f"; also saw {', '.join(others)}"
+        vulnerable = bool(affected)
+        label = f"{rule.name} {version_text}" + (" (known-vulnerable range)" if vulnerable else "")
+        checks.append(_Check(
+            case_id, label, rule.severity, not vulnerable,
+            observed=observed, risk=rule.risk if vulnerable else "", expected=rule.expected,
+            mitigation=rule.mitigation, sent=f"GET {page_url}",
+            limitations=LIBRARY_LIMITATION, confidence="medium", evidence_quality="heuristic", status="confirmed",
+        ))
+    return checks
+
+
 def _to_finding(check: _Check, url: str) -> Finding:
     return Finding(
-        id=f"F-{check.id}", case_id=check.id, status="confirmed", severity=check.severity, confidence="high",
-        evidence_quality="deterministic", title=check.name, pack=PACK, category="Web security",
+        id=f"F-{check.id}", case_id=check.id, status=check.status, severity=check.severity, confidence=check.confidence,
+        evidence_quality=check.evidence_quality, title=check.name, pack=PACK, category="Web security",
         risk=check.risk, expected=check.expected,
         evidence=Evidence(prompt=check.sent or f"GET {url}", response=check.observed, assertion=f"{check.name}: check failed"),
-        reproductions="Observed in a single request.", mitigation=check.mitigation, limitations=check.limitations,
+        reproductions="Observed from page markup. No exploit was attempted." if check.evidence_quality == "heuristic"
+        else "Observed in a single request.",
+        mitigation=check.mitigation, limitations=check.limitations,
     )
 
 
@@ -248,7 +338,8 @@ def scan(request: WebScanRequest) -> Run:
     started = time.perf_counter()
     checks: list[_Check] = []
     warnings = [
-        "Passive checks only: a missing header is a weakness, not proof of an exploitable vulnerability.",
+        "Passive checks only: a missing header or an outdated library is not proof the site can be exploited.",
+        "Library versions are read from this page's script and stylesheet URLs, or from a version banner in a same-host file.",
         "Not covered: authentication, access control, business logic, and injection flaws such as SQLi or XSS.",
     ]
     def session_for(verify: bool) -> _Session:
@@ -277,6 +368,7 @@ def scan(request: WebScanRequest) -> Run:
                                  mitigation="Serve the site over HTTPS and redirect HTTP to HTTPS."))
         checks += _header_checks(page, https)
         checks += _cookie_checks(page, https)
+        checks += _library_checks(session, url, page)
         checks.append(_cors_check(session, url))
         checks += _file_checks(session, url)
     except httpx.HTTPError as error:
