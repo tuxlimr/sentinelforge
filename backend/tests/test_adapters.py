@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from sentinelforge.adapters import ScopeError, build_target
+from sentinelforge.adapters import ScopeError, TargetError, build_target
 from sentinelforge.adapters.callable_target import CallableTarget
 from sentinelforge.adapters.http_target import HttpTarget
 from sentinelforge.models import Scope, TargetSpec
@@ -86,7 +86,7 @@ def test_http_ask_blocks_redirects(monkeypatch):
         HttpTarget(http_spec(), SCOPE).ask("p", {}, 1)
 
 
-def test_http_ask_raises_on_server_error(monkeypatch):
+def test_http_ask_raises_clear_target_error_on_server_error(monkeypatch):
     fake_post(monkeypatch, httpx.Response(500, request=httpx.Request("POST", URL)))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(TargetError, match="HTTP 500"):  # readable reason, not a bare HTTPStatusError
         HttpTarget(http_spec(), SCOPE).ask("p", {}, 1)

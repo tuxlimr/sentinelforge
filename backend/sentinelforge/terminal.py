@@ -32,7 +32,10 @@ def print_results(console: Console, run: Run) -> None:
     for result in run.results:
         outcome = {"passed": "[green]PASS[/]", "failed": "[red]FAIL[/]"}.get(result.outcome, f"[yellow]{result.outcome.upper()}[/]")
         severity = f"[{SEVERITY_STYLE[result.severity]}]{result.severity}[/]"
-        table.add_row(f"{result.case_id} {escape(result.name)}", result.pack, severity, outcome)
+        name = escape(result.name)
+        if result.outcome in ("error", "skipped") and result.note:
+            name += f"\n[dim]{escape(result.note)}[/]"
+        table.add_row(f"{result.case_id} {name}", result.pack, severity, outcome)
     console.print(table)
 
 

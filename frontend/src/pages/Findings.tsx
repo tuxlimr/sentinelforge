@@ -10,6 +10,11 @@ import { RunMetrics } from "../components/RunMetrics";
 import { cliCommand, download, formatDate, safeName, SEVERITY_TONE, TARGET_LABEL } from "../format";
 import { useAsync } from "../hooks/useAsync";
 
+// error/skipped are inconclusive, not failures: amber, not red.
+const OUTCOME_COLOR: Record<string, string> = {
+  passed: "var(--pass)", failed: "var(--fail)", error: "var(--warn)", skipped: "var(--warn)",
+};
+
 export function Findings() {
   const [params, setParams] = useSearchParams();
   const runs = useAsync(api.listRuns);
@@ -122,10 +127,15 @@ export function Findings() {
             <tbody>
               {run.results.map((result) => (
                 <tr key={result.case_id}>
-                  <td><span className="mono dim">{result.case_id}</span> {result.name}</td>
+                  <td>
+                    <span className="mono dim">{result.case_id}</span> {result.name}
+                    {(result.outcome === "error" || result.outcome === "skipped") && result.note && (
+                      <div className="small muted" style={{ marginTop: 2 }}>{result.note}</div>
+                    )}
+                  </td>
                   <td className="muted">{result.pack}</td>
                   <td><SeverityBadge severity={result.severity} /></td>
-                  <td style={{ color: result.outcome === "passed" ? "var(--pass)" : "var(--fail)" }}>{result.outcome}</td>
+                  <td style={{ color: OUTCOME_COLOR[result.outcome] }}>{result.outcome}</td>
                   <td className="mono muted">{result.duration_ms} ms</td>
                 </tr>
               ))}

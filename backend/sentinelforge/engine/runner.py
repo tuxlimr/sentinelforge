@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from .. import PACK_VERSION, __version__
-from ..adapters import ScopeError, Target, TargetReply, build_target
+from ..adapters import ScopeError, Target, TargetError, TargetReply, build_target
 from ..models import SEVERITY_RANK, CaseResult, Evidence, Finding, Run, RunRequest, TestCase
 from ..packs import PACKS, all_cases
 from .evaluators import Verdict, evaluate
@@ -78,6 +78,8 @@ def _run_case(target: Target, case: TestCase, request: RunRequest) -> tuple[Case
         verdict, reply = _ask_and_evaluate(target, case, request)
     except ScopeError:
         raise
+    except TargetError as error:  # a clear, human-readable reason the target could not be used
+        return result("error", str(error)), None, 1
     except Exception as error:  # target failure is inconclusive, never a pass
         return result("error", type(error).__name__), None, 1
 

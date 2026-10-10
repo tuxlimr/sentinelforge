@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-10
+
+### Changed
+- HTTP targets that are not AI endpoints now fail with a clear reason instead of a bare `HTTPStatusError`:
+  e.g. "Target returned HTTP 404, not an AI response. Is this the right path to an LLM endpoint...". An HTML
+  200, a bad status, or an unreachable host each give their own message. These cases stay inconclusive, never
+  counted as passed.
+- Dashboard: errored/skipped cases show the reason inline and in amber; the CI policy gate shows **INCONCLUSIVE**
+  (not a green PASSED) when cases errored without any confirmed finding.
+
 ## [0.2.0] - 2026-10-10
 
 ### Added

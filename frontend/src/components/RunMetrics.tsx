@@ -8,6 +8,14 @@ export function RunMetrics({ run, failOn }: { run: Run; failOn: Severity }) {
   const potential = run.findings.length - confirmed;
   const blocked = isBlocked(run, failOn);
   const rate = passRate(run);
+  // No confirmed finding, but cases errored: nothing really ran, so the green "PASSED" would mislead.
+  const inconclusive = !blocked && run.counts.error > 0;
+  const gate = blocked
+    ? { value: "BLOCKED", icon: "cancel" as const, tone: "var(--fail)", hint: `Rule: no confirmed finding ≥ ${failOn} · exit 1` }
+    : inconclusive
+      ? { value: "INCONCLUSIVE", icon: "help" as const, tone: "var(--warn)",
+          hint: `${run.counts.error} case(s) errored — review before trusting · exit 0` }
+      : { value: "PASSED", icon: "check_circle" as const, tone: "var(--pass)", hint: `Rule: no confirmed finding ≥ ${failOn} · exit 0` };
 
   return (
     <div className="grid grid-4">
@@ -18,9 +26,8 @@ export function RunMetrics({ run, failOn }: { run: Run; failOn: Severity }) {
         hint="No LLM judge: every verdict is reproducible" />
       <Metric label="Budget & limits" icon="speed" value={run.budget.requests} unit="requests"
         hint={`${run.budget.cases_run}/${run.budget.max_cases} cases · ${formatDuration(run.duration_ms)}`} />
-      <Metric label="CI policy gate" icon={blocked ? "cancel" : "check_circle"} value={blocked ? "BLOCKED" : "PASSED"}
-        tone={blocked ? "var(--fail)" : "var(--pass)"} blocked={blocked}
-        hint={`Rule: no confirmed finding ≥ ${failOn} · exit ${blocked ? 1 : 0}`} />
+      <Metric label="CI policy gate" icon={gate.icon} value={gate.value} tone={gate.tone} blocked={blocked}
+        hint={gate.hint} />
     </div>
   );
 }

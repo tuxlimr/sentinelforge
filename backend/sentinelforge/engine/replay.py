@@ -6,7 +6,7 @@ import time
 
 from pydantic import BaseModel
 
-from ..adapters import build_target
+from ..adapters import TargetError, build_target
 from ..models import Scope, TargetSpec
 from ..packs import all_cases
 from ..storage import regressions
@@ -39,6 +39,8 @@ def replay(request: ReplayRequest) -> list[ReplayResult]:
             reply = target.ask(record["prompt"], record["context"], 10)
             verdict = evaluate(case.model_copy(update={"prompt": record["prompt"]}), reply, request.scope)
             status, message = ("passing" if verdict.passed else "blocked"), verdict.assertion
+        except TargetError as error:
+            status, message = "error", str(error)
         except Exception as error:
             status, message = "error", type(error).__name__
         results.append(ReplayResult(id=record["id"], status=status, message=message,

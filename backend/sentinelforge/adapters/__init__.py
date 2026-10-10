@@ -1,6 +1,6 @@
 from ..demo import safe_app, vulnerable_app
 from ..models import Scope, TargetSpec
-from .base import ScopeError, Target, TargetReply
+from .base import ScopeError, Target, TargetError, TargetReply
 from .callable_target import CallableTarget
 from .http_target import HttpTarget
 
@@ -14,4 +14,4 @@ def build_target(spec: TargetSpec, scope: Scope) -> Target:
     return HttpTarget(spec, scope)
 
 
-__all__ = ["ScopeError", "Target", "TargetReply", "build_target"]
+__all__ = ["ScopeError", "Target", "TargetError", "TargetReply", "build_target"]

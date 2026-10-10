@@ -11,6 +11,14 @@ class ScopeError(Exception):
     """The target is outside the authorized scope. The run must fail closed."""
 
 
+class TargetError(Exception):
+    """The target could not be used as an AI endpoint (bad HTTP status, unreachable, or a non-AI response).
+
+    Its message is written for a person and is stored as the case note, so a run shows *why* it was
+    inconclusive instead of a bare exception type.
+    """
+
+
 @dataclass
 class TargetReply:
     text: str
