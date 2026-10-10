@@ -277,6 +277,31 @@ def exposure(
     raise typer.Exit(1 if severity_failures(run, fail_on.value) else 0)
 
 
+@app.command()
+def webscan(
+    url: Annotated[str, typer.Argument(help="The site to check, e.g. https://your-site.example.com/ (localhost is always allowed)")],
+    authorized: Annotated[bool, typer.Option("--authorized", help="Confirm you own this site or are authorized to test it")] = False,
+    fail_on: Annotated[Severity, typer.Option(help="Lowest severity that fails the build")] = Severity.high,
+) -> None:
+    """Check a website for common security misconfigurations (passive: ordinary GET requests only)."""
+    from urllib.parse import urlparse
+
+    from .engine.webscan import WebScanRequest, scan as web_scan
+
+    host = urlparse(url).hostname or ""
+    request = WebScanRequest(url=url, scope=Scope(authorization_confirmed=authorized, allowed_hosts=[host] if authorized else []))
+    try:
+        with console.status(f"Checking {escape(url)}...", spinner="line"):
+            run = web_scan(request)
+    except ScopeError as error:
+        raise _fail(f"Scope error: {error}") from error
+    runs.save_run(run)
+    print_results(console, run)
+    print_findings(console, run)
+    print_summary(console, run)
+    raise typer.Exit(1 if severity_failures(run, fail_on.value) else 0)
+
+
 WORKFLOW = """\
 name: SentinelForge
 on: [push, pull_request]

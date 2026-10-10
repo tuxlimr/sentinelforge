@@ -64,6 +64,10 @@ export function cliCommand(run: Run | undefined, failOn: Severity): string | nul
     const authorized = LOOPBACK.includes(run.target) ? "" : " --authorized";
     return `sentinelforge exposure ${run.target}${expected.join("")}${authorized} --fail-on ${failOn}`;
   }
+  if (kind === "web" && run) {
+    const host = new URL(run.target).hostname.replace(/^\[|\]$/g, "");
+    return `sentinelforge webscan ${run.target}${LOOPBACK.includes(host) ? "" : " --authorized"} --fail-on ${failOn}`;
+  }
   return null;
 }
 

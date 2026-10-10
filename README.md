@@ -135,6 +135,24 @@ The config is validated strictly: unknown keys are errors (so a typo in a safety
 sensitive headers must reference environment variables, and the exported pytest file reads those variables at
 run time, so no secret is ever written to disk.
 
+### Website security check
+
+Checks a website you own (or are authorized to test) for common security misconfigurations: missing security
+headers (CSP, HSTS, clickjacking, nosniff, Referrer-Policy), weak cookie flags, software version disclosure,
+CORS that trusts any origin, exposed `.git`, `.env` and `phpinfo()` files, directory listing, plain HTTP and
+invalid TLS certificates.
+
+```bash
+sentinelforge webscan http://localhost:3000/                          # loopback needs no confirmation
+sentinelforge webscan https://your-site.example.com/ --authorized     # only for sites you may test
+```
+
+It is passive: about a dozen ordinary GET requests, no attack payloads, no logins or form submissions, and
+redirects to other hosts are never followed. Secret values found in exposed files are never stored, only their
+names. A missing header is a weakness, not proof of an exploitable vulnerability, and it does not test for SQL
+injection, XSS or broken access control; use an active scanner such as OWASP ZAP for those. Results are saved as a
+run (`POST /api/webscan`) and appear in the dashboard.
+
 ### Network exposure check (nmap)
 
 Flags open TCP ports on your app's host that you did not expect, such as an exposed Redis, vector DB, Ollama or Jupyter. Needs [nmap](https://nmap.org/download) installed (`winget install Insecure.Nmap`).
