@@ -3,9 +3,37 @@ import type {
   Settings, TargetSpec, TestCaseInfo,
 } from "./types";
 
+const GET_TIMEOUT_MS = 10_000;
+const RETRY_DELAYS_MS = [300, 1000];
+const TRANSIENT_STATUS = new Set([502, 503, 504]); // the dev proxy could not reach the API
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Reads ride out transient connection failures (a dropped or stalled localhost connection, a proxy 502) with a
+ * timeout and two retries. Writes are never retried: repeating a POST could start a second scan.
+ */
+async function send(path: string, init?: RequestInit): Promise<Response> {
+  const isRead = (init?.method ?? "GET") === "GET";
+  for (let attempt = 0; ; attempt++) {
+    const retriesLeft = isRead && attempt < RETRY_DELAYS_MS.length;
+    try {
+      const response = await fetch(`/api${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...(isRead ? { signal: AbortSignal.timeout(GET_TIMEOUT_MS) } : {}),
+        ...init,
+      });
+      if (!(retriesLeft && TRANSIENT_STATUS.has(response.status))) return response;
+    } catch (error) {
+      if (!retriesLeft) throw error instanceof DOMException && error.name === "TimeoutError" ? new Error("Request timed out") : error;
+    }
+    await sleep(RETRY_DELAYS_MS[attempt]);
+  }
+}
+
 /** Thin wrapper over fetch that throws readable errors from the API's `detail` field. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+  const response = await send(path, init);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`);
