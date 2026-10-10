@@ -87,8 +87,45 @@ def test_function_name(record_id: str) -> str:
     return "test_" + re.sub(r"[^a-z0-9]+", "_", record_id.lower()).strip("_")
 
 
-def export_pytest() -> str:
-    parts = [_PYTEST_HEADER]
+_HTTP_HEADER = r'''"""Regression tests exported by SentinelForge for {url}.
+
+Run with `pytest <this file>`. Secrets are read from environment variables at run time, never stored here.
+"""
+import os
+import re
+
+import httpx
+
+URL = {url!r}
+HEADERS = {headers!r}
+ALLOWED_TOOLS = {tools!r}
+CANARIES = {canaries!r}
+
+
+def TARGET(prompt, context):
+    headers = {{name: re.sub(r"\$\{{(\w+)\}}", lambda m: os.environ[m.group(1)], value) for name, value in HEADERS.items()}}
+    response = httpx.post(URL, json={{"prompt": prompt, "context": context}}, headers=headers, timeout=30, follow_redirects=False)
+    response.raise_for_status()
+    try:
+        body = response.json()
+    except ValueError:
+        return {{"text": response.text}}
+    return body if isinstance(body, dict) else {{"text": str(body)}}
+'''
+
+
+def export_pytest(url: str | None = None, headers: dict[str, str] | None = None,
+                  allowed_tools: list[str] | None = None, canaries: list[str] | None = None) -> str:
+    """Pytest source for every saved regression. With `url`, tests call that HTTP endpoint; otherwise the safe demo.
+
+    `headers` must be the raw config values (with ${VAR} references), so no secret is written to the file.
+    """
+    if url:
+        header = _HTTP_HEADER.format(url=url, headers=headers or {}, tools=allowed_tools or ["search_docs"],
+                                     canaries=canaries or ["SF-CANARY-7f3a91", "SF-TENANT-B-4c2e"])
+    else:
+        header = _PYTEST_HEADER
+    parts = [header]
     for record in list_regressions():
         lines = [
             f"def {test_function_name(record['id'])}():",

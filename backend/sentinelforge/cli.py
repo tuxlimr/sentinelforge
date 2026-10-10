@@ -10,9 +10,11 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .adapters import ScopeError
+from .config_file import ConfigError, ProjectConfig, load_config, starter_config
 from .engine import execute
 from .engine.replay import ReplayRequest, replay
 from .models import Limits, Run, RunRequest, Scope, TargetSpec
@@ -95,19 +97,53 @@ def guide(
     raise typer.Exit(run_guide(console, assume_yes=yes))
 
 
+ConfigOption = Annotated[Path | None, typer.Option("--config", "-c", help="Project config (sentinelforge.yaml) for testing your own app")]
+
+
+def _load_config(path: Path) -> ProjectConfig:
+    try:
+        return load_config(path)
+    except ConfigError as error:
+        raise _fail(str(error)) from error
+
+
+def _resolve(config: Path | None, target: Target | None) -> tuple[ProjectConfig | None, TargetSpec, Scope, str]:
+    """Config file or demo target (not both). Returns the config, target, scope and how to re-run it."""
+    if config and target:
+        raise _fail("Use either --config or --target, not both.")
+    if config:
+        project = _load_config(config)
+        try:
+            spec = project.target_spec()
+        except ConfigError as error:
+            raise _fail(str(error)) from error
+        return project, spec, project.scope_model(), f"--config {config}"
+    kind = (target or Target.safe_demo).value
+    return None, TargetSpec(kind=kind), Scope(), f"--target {kind}"
+
+
 @app.command()
 def test(
-    target: Annotated[Target, typer.Option(help="Which bundled demo app to test")] = Target.safe_demo,
-    fail_on: Annotated[Severity, typer.Option(help="Lowest severity that fails the build")] = Severity.high,
+    config: ConfigOption = None,
+    target: Annotated[Target | None, typer.Option(help="A bundled demo app (default: safe_demo). Use --config for your own app.")] = None,
+    fail_on: Annotated[Severity | None, typer.Option(help="Lowest severity that fails the build (default: config ci.fail_on, else high)")] = None,
     concurrency: Annotated[int | None, typer.Option(min=1, max=256, help="Parallel workers (default: auto-sized to this machine)")] = None,
     format: Annotated[Format, typer.Option(help="terminal for people; json/sarif/markdown for machines")] = Format.terminal,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write the report here instead of stdout")] = None,
     details: Annotated[bool, typer.Option(help="Show full evidence and fixes for each finding")] = True,
 ) -> None:
-    """Run all packs and exit 1 when a confirmed finding meets --fail-on (exit 2 = scope/config error)."""
+    """Run the test packs and exit 1 when a confirmed finding meets --fail-on (exit 2 = scope/config error)."""
+    project, spec, scope, rerun = _resolve(config, target)
+    threshold = fail_on.value if fail_on else (project.ci.fail_on if project else "high")
+    if project:
+        request = project.run_request()
+        if concurrency:
+            request.limits.max_concurrency = concurrency
+    else:
+        request = RunRequest(target=spec, scope=scope, limits=Limits(max_concurrency=concurrency))
+    name = spec.name or spec.url or spec.kind
     try:
-        request = RunRequest(target=TargetSpec(kind=target.value), limits=Limits(max_concurrency=concurrency))
-        with console.status(f"Testing {target.value}...", spinner="line") if format is Format.terminal else nullcontext():
+        with console.status(f"Testing {escape(name)}...", spinner="line") if format is Format.terminal else nullcontext():
             run = execute(request)
     except ScopeError as error:
         raise _fail(f"Scope error: {error}") from error
@@ -118,11 +154,11 @@ def test(
         if details:
             print_findings(console, run)
         print_summary(console, run)
-        print_next_steps(console, run, fail_on.value)
+        print_next_steps(console, run, threshold, rerun)
     else:
         _emit(run, format, output)
 
-    raise typer.Exit(1 if severity_failures(run, fail_on.value) else 0)
+    raise typer.Exit(1 if severity_failures(run, threshold) else 0)
 
 
 @app.command()
@@ -173,28 +209,37 @@ def regressions_add(
 
 @regressions_app.command("replay")
 def regressions_replay(
-    target: Annotated[Target, typer.Option(help="Which demo app to replay against")] = Target.safe_demo,
+    config: ConfigOption = None,
+    target: Annotated[Target | None, typer.Option(help="A bundled demo app (default: safe_demo). Use --config for your own app.")] = None,
 ) -> None:
     """Replay every saved regression. Exit 1 if any still reproduce (use as a CI gate)."""
     if not regressions.list_regressions():
         raise _fail("No regressions saved yet. Run `sentinelforge regressions add` first.", code=1)
+    _, spec, scope, _ = _resolve(config, target)
     try:
-        results = replay(ReplayRequest(target=TargetSpec(kind=target.value)))
+        with console.status("Replaying regressions...", spinner="line"):
+            results = replay(ReplayRequest(target=spec, scope=scope))
     except ScopeError as error:
         raise _fail(f"Scope error: {error}") from error
     for result in results:
-        console.print(f"  {STATUS_NOTE[result.status]}  {result.id}  [dim]{result.message}[/]")
+        console.print(f"  {STATUS_NOTE[result.status]}  {escape(result.id)}  [dim]{escape(result.message)}[/]")
     bad = [r for r in results if r.status != "passing"]
-    console.print(f"\n{len(results) - len(bad)} of {len(results)} regressions pass on {target.value}.")
+    console.print(f"\n{len(results) - len(bad)} of {len(results)} regressions pass on {escape(spec.name or spec.url or spec.kind)}.")
     raise typer.Exit(1 if bad else 0)
 
 
 @regressions_app.command("export")
 def regressions_export(
+    config: ConfigOption = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write a pytest file here")] = None,
 ) -> None:
-    """Export regressions as a pytest file."""
-    text = regressions.export_pytest()
+    """Export regressions as a pytest file. With --config, the tests call your HTTP endpoint."""
+    project = _load_config(config) if config else None
+    if project and project.target.kind == "http":
+        text = regressions.export_pytest(url=project.target.url, headers=project.target.headers,  # raw ${VAR} values
+                                         allowed_tools=project.scope.allowed_tools, canaries=project.scope.canaries)
+    else:
+        text = regressions.export_pytest()
     if output:
         output.write_text(text, encoding="utf-8")
         console.print(f"Wrote {output}")
@@ -247,12 +292,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - run: pip install sentinelforge
-      # Replace safe_demo with your own target once you have one configured.
+      - run: pip install sentinelforge-ai   # the PyPI name; "sentinelforge" on PyPI is a different project
       - name: Run security tests
-        run: sentinelforge test --target safe_demo --fail-on high --format sarif -o sentinelforge.sarif
+        run: sentinelforge test --config sentinelforge.yaml --format sarif -o sentinelforge.sarif
+        # env:
+        #   APP_TOKEN: ${{ secrets.APP_TOKEN }}   # for headers that reference ${APP_TOKEN}
       - name: Replay saved regressions
-        run: sentinelforge regressions replay --target safe_demo
+        if: hashFiles('.sentinelforge/sentinelforge.db') != ''
+        run: sentinelforge regressions replay --config sentinelforge.yaml
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -262,16 +309,29 @@ jobs:
 
 @app.command()
 def init(
-    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing workflow")] = False,
+    url: Annotated[str | None, typer.Option(help="Your app's endpoint, e.g. https://app.example.com/api/ask")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing files")] = False,
 ) -> None:
-    """Add a GitHub Actions workflow that gates builds on SentinelForge."""
-    path = Path.cwd() / ".github" / "workflows" / "sentinelforge.yml"
-    if path.exists() and not force:
-        raise _fail(f"{path} already exists. Use --force to overwrite.", code=1)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(WORKFLOW, encoding="utf-8")
-    console.print(f"Wrote {path}")
-    console.print("Commit it, and builds will fail on confirmed findings. Edit the target line to test your own app.")
+    """Create sentinelforge.yaml and a GitHub Actions workflow that gates builds on it."""
+    try:
+        config_text = starter_config(url)
+    except ConfigError as error:
+        raise _fail(str(error)) from error
+    files = {Path.cwd() / "sentinelforge.yaml": config_text,
+             Path.cwd() / ".github" / "workflows" / "sentinelforge.yml": WORKFLOW}
+    existing = [str(path) for path in files if path.exists()]
+    if existing and not force:
+        raise _fail(f"Already exists: {', '.join(existing)}. Use --force to overwrite.", code=1)
+    for path, text in files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        console.print(f"Wrote {path}")
+    if url:
+        console.print("Next: confirm you are authorized to test this app, set scope.authorization_confirmed: true, "
+                      "then run `sentinelforge test --config sentinelforge.yaml`.")
+    else:
+        console.print("Next: edit the target in sentinelforge.yaml to point at your app, "
+                      "or run `sentinelforge init --url <your endpoint> --force`.")
 
 
 @app.command()

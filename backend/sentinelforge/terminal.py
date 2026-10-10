@@ -66,12 +66,13 @@ def print_summary(console: Console, run: Run) -> None:
         console.print(f"[dim]Note: {warning}[/]")
 
 
-def print_next_steps(console: Console, run: Run, fail_on: str = "high") -> None:
+def print_next_steps(console: Console, run: Run, fail_on: str = "high", rerun: str | None = None) -> None:
+    rerun = escape(rerun or f"--target {run.target_kind}")
     steps = []
     if run.findings:
-        steps.append(f"Fix the issues above, then re-run: sentinelforge test --target {run.target_kind}")
+        steps.append(f"Fix the issues above, then re-run: sentinelforge test {rerun}")
         steps.append(f"Lock them in as tests:        sentinelforge regressions add --run {run.id}")
-        steps.append("Replay after your fix:        sentinelforge regressions replay --target safe_demo")
+        steps.append(f"Replay after your fix:        sentinelforge regressions replay {rerun}")
     else:
         steps.append("Add this to CI:               sentinelforge init")
         steps.append("Export findings to GitHub:    sentinelforge report latest --format sarif -o sentinelforge.sarif")
