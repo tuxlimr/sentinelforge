@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .runs import data_dir
+from .db import connect
 
 
 class Settings(BaseModel):
@@ -16,15 +16,13 @@ class Settings(BaseModel):
     fail_on: str = Field("high", pattern="^(critical|high|medium|low|informational)$")
 
 
-def _file():
-    return data_dir() / "settings.json"
-
-
 def load_settings() -> Settings:
-    path = _file()
-    return Settings.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else Settings()
+    with connect() as db:
+        row = db.execute("SELECT payload FROM settings WHERE id = 1").fetchone()
+    return Settings.model_validate_json(row["payload"]) if row else Settings()
 
 
 def save_settings(settings: Settings) -> Settings:
-    _file().write_text(settings.model_dump_json(indent=2), encoding="utf-8")
+    with connect() as db:
+        db.execute("INSERT OR REPLACE INTO settings VALUES (1, ?)", (settings.model_dump_json(),))
     return settings

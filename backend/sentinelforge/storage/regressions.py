@@ -9,39 +9,35 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from ..packs import all_cases
-from .runs import data_dir
+from .db import connect
 
 
 def regression_id(case_id: str, mutation: str | None) -> str:
     return f"{case_id}+{mutation}" if mutation and mutation != "baseline" else case_id
 
 
-def _file() -> Path:
-    return data_dir() / "regressions.jsonl"
+def _record(row) -> dict:
+    record = dict(row)
+    record["context"] = json.loads(record["context"])
+    record["check"] = json.loads(record.pop("check"))
+    return record
 
 
 def list_regressions() -> list[dict]:
-    if not _file().exists():
-        return []
-    lines = _file().read_text(encoding="utf-8").splitlines()
-    records = [json.loads(line) for line in lines if line.strip()]
-    for record in records:  # older files stored only case_id
-        record.setdefault("id", record["case_id"])
-    return records
-
-
-def _write_all(records: list[dict]) -> None:
-    _file().write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    """Oldest first, in the order they were saved."""
+    with connect() as db:
+        rows = db.execute(
+            'SELECT id, case_id, name, pack, severity, mutation, source, prompt, context, "check" FROM regressions ORDER BY rowid'
+        ).fetchall()
+    return [_record(row) for row in rows]
 
 
 def add_regression(case_id: str, source: str, prompt: str | None = None, mutation: str | None = None) -> dict:
     """Save a regression. Idempotent per id. Raises KeyError for unknown cases."""
-    records = list_regressions()
     new_id = regression_id(case_id, mutation)
-    existing = next((r for r in records if r["id"] == new_id), None)
+    existing = next((r for r in list_regressions() if r["id"] == new_id), None)
     if existing:
         return existing
     case = next((c for c in all_cases() if c.id == case_id), None)
@@ -52,12 +48,19 @@ def add_regression(case_id: str, source: str, prompt: str | None = None, mutatio
         "mutation": mutation, "source": source, "prompt": prompt or case.prompt,
         "context": case.context, "check": case.check,
     }
-    _write_all(records + [record])
+    with connect() as db:
+        db.execute(
+            'INSERT OR IGNORE INTO regressions (id, case_id, name, pack, severity, mutation, source, prompt, context, "check")'
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (*(record[k] for k in ("id", "case_id", "name", "pack", "severity", "mutation", "source", "prompt")),
+             json.dumps(record["context"]), json.dumps(record["check"])),
+        )
     return record
 
 
 def remove_regression(regression: str) -> None:
-    _write_all([r for r in list_regressions() if r["id"] != regression])
+    with connect() as db:
+        db.execute("DELETE FROM regressions WHERE id = ?", (regression,))
 
 
 _PYTEST_HEADER = '''"""Regression tests exported by SentinelForge.

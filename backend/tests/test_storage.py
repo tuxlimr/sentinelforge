@@ -134,3 +134,41 @@ def test_exported_tests_fail_against_vulnerable_app():
     exec(compile(source, "exported", "exec"), namespace)
     with pytest.raises(AssertionError):
         namespace["test_sf_pi_001"]()
+
+
+# --- sqlite --------------------------------------------------------------------------------------
+
+def test_legacy_json_files_are_imported_once_and_left_in_place():
+    run = make_run("vulnerable_demo")
+    folder = runs.data_dir() / "runs"
+    folder.mkdir()
+    (folder / f"{run.id}.json").write_text(run.model_dump_json(indent=2), encoding="utf-8")
+    (folder / "broken.json").write_text("{not json", encoding="utf-8")  # must not block startup
+    (runs.data_dir() / "settings.json").write_text(settings.Settings(max_cases=7).model_dump_json(), encoding="utf-8")
+    (runs.data_dir() / "regressions.jsonl").write_text(
+        json.dumps({"id": "SF-PI-001", "case_id": "SF-PI-001", "name": "n", "pack": "p", "severity": "high", "mutation": None,
+                    "source": run.id, "prompt": "x", "context": {}, "check": {"type": "not_contains", "values": []}}) + "\n")
+
+    assert runs.get_run(run.id) == run
+    assert settings.load_settings().max_cases == 7
+    assert [r["id"] for r in regressions.list_regressions()] == ["SF-PI-001"]
+
+    runs.delete_run(run.id)  # a deletion must not be undone by re-importing the old file next time
+    assert runs.get_run(run.id) is None and (folder / f"{run.id}.json").exists()
+
+
+def test_data_lives_in_one_sqlite_file():
+    runs.save_run(make_run())
+    regressions.add_regression("SF-PI-001", "scan")
+    settings.save_settings(settings.Settings(timeout_seconds=5))
+    assert (runs.data_dir() / "sentinelforge.db").is_file()
+    assert not list(runs.data_dir().glob("*.jsonl")) and not (runs.data_dir() / "runs").exists()
+
+
+def test_concurrent_writers_do_not_lose_runs():
+    from concurrent.futures import ThreadPoolExecutor
+
+    created = [make_run() for _ in range(20)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(runs.save_run, created))
+    assert {r.id for r in runs.list_runs()} == {r.id for r in created}
