@@ -1,7 +1,7 @@
 [project]
 # Distribution name only: "sentinelforge" on PyPI is an unrelated project. Import name and CLI stay `sentinelforge`.
 name = "sentinelforge-ai"
-version = "0.1.0"
+dynamic = ["version"]  # from sentinelforge/__init__.py
 description = "Security regression testing for LLM apps, RAG pipelines and agents: find, verify, regress."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +37,9 @@ sentinelforge = "sentinelforge.cli:app"
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "sentinelforge.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["sentinelforge*"]

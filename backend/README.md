@@ -11,6 +11,7 @@ pip install sentinelforge-ai
 sentinelforge guide                                            # 2-minute offline tour, no API keys
 sentinelforge init --url https://your-app.example.com/api/ask  # config + GitHub Actions workflow
 sentinelforge test --config sentinelforge.yaml                 # test your own app
+sentinelforge webscan https://your-site.example.com/ --authorized   # passive website security check
 ```
 
 The PyPI distribution is `sentinelforge-ai`; the import name and command are `sentinelforge`.

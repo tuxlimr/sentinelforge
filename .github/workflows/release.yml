@@ -17,8 +17,8 @@ jobs:
           python-version: "3.12"
       - name: Version must match the release tag
         run: |
-          version=$(python -c "import tomllib; print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])")
-          test "v$version" = "${GITHUB_REF_NAME}" || { echo "pyproject version v$version != tag ${GITHUB_REF_NAME}"; exit 1; }
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('backend/sentinelforge/__init__.py').read()).group(1))")
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "package version v$version != tag ${GITHUB_REF_NAME}"; exit 1; }
       - run: pip install build
       - run: python -m build backend --outdir dist
       - name: Test the built wheel, not the source tree
