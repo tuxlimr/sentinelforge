@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.venv/
+.sentinelforge/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.claude/
+*.log
+.env
+.env.*
