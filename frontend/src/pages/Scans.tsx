@@ -6,6 +6,7 @@ import { RunLauncher } from "../components/RunLauncher";
 import { RunMetrics } from "../components/RunMetrics";
 import { RunTable } from "../components/RunTable";
 import { TrendChart } from "../components/TrendChart";
+import { cliCommand } from "../format";
 import { useAsync } from "../hooks/useAsync";
 
 export function Scans() {
@@ -20,6 +21,7 @@ export function Scans() {
 
   const latest = runs.data[0];
   const failOn = settings.data.fail_on;
+  const command = cliCommand(latest, failOn);
 
   return (
     <>
@@ -28,9 +30,11 @@ export function Scans() {
           <h1>Security scans</h1>
           <p>Run deterministic security tests, then verify and regress what they find.</p>
         </div>
-        <div className="terminal">
-          <span className="prompt">$</span>sentinelforge test --target safe_demo --fail-on {failOn}
-        </div>
+        {command && (
+          <div className="terminal">
+            <span className="prompt">$</span>{command}
+          </div>
+        )}
       </div>
 
       {latest ? (

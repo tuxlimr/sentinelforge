@@ -52,3 +52,23 @@ export async function copyText(text: string): Promise<void> {
 
 /** Last path segment of a safe filename, for downloads. */
 export const safeName = (value: string) => value.replace(/[^a-zA-Z0-9._-]+/g, "_");
+
+const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
+
+/** The CLI command that reproduces a run, or null when the CLI cannot (HTTP targets are configured in the UI/API). */
+export function cliCommand(run: Run | undefined, failOn: Severity): string | null {
+  const kind: string = run?.target_kind ?? "vulnerable_demo";
+  if (kind === "vulnerable_demo" || kind === "safe_demo") return `sentinelforge test --target ${kind} --fail-on ${failOn}`;
+  if (kind === "network" && run) {
+    const expected = run.results.filter((r) => r.note === "expected").map((r) => ` --expect ${r.case_id.replace("SF-NX-", "")}`);
+    const authorized = LOOPBACK.includes(run.target) ? "" : " --authorized";
+    return `sentinelforge exposure ${run.target}${expected.join("")}${authorized} --fail-on ${failOn}`;
+  }
+  return null;
+}
+
+/** Green only at 100%; any failure is amber, and nothing passing is red. */
+export function passRateTone(rate: number): string {
+  if (rate >= 100) return "var(--pass)";
+  return rate <= 0 ? "var(--fail)" : "var(--warn)";
+}

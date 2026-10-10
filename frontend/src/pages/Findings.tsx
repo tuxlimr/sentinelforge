@@ -7,7 +7,7 @@ import { Empty, ErrorBox, Loading } from "../components/States";
 import { FindingDetail } from "../components/FindingDetail";
 import { Icon } from "../components/Icon";
 import { RunMetrics } from "../components/RunMetrics";
-import { download, formatDate, safeName, SEVERITY_TONE, TARGET_LABEL } from "../format";
+import { cliCommand, download, formatDate, safeName, SEVERITY_TONE, TARGET_LABEL } from "../format";
 import { useAsync } from "../hooks/useAsync";
 
 export function Findings() {
@@ -41,7 +41,7 @@ export function Findings() {
     runs.reload();
   }
 
-  const cliCommand = `sentinelforge test --target ${run.target_kind} --fail-on ${settings.data.fail_on}`;
+  const command = cliCommand(run, settings.data.fail_on);
 
   return (
     <>
@@ -133,7 +133,7 @@ export function Findings() {
           </table>
         </div>
         <div className="panel-body stack">
-          <div className="terminal"><span className="prompt">$</span>{cliCommand}</div>
+          {command && <div className="terminal"><span className="prompt">$</span>{command}</div>}
           <div className="small dim mono">
             tool {run.tool_version} · packs {run.pack_version} · config {run.config_hash} · {run.sanitization}
           </div>
